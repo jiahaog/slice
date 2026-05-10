@@ -1,8 +1,7 @@
 //! Hand-written parser for Python-style slice expressions.
 //!
-//! Grammar:
-//!     expr  := part ("," part)*
-//!     part  := slice | index
+//! Grammar (matches what's accepted inside `[]` for a Python list/string):
+//!     expr  := slice | index
 //!     index := INT
 //!     slice := [INT] ":" [INT] [ ":" [INT] ]
 //!     INT   := ["+"|"-"] DIGIT+
@@ -10,7 +9,7 @@
 use std::fmt;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
-pub enum Part {
+pub enum Expr {
     /// A single column index, e.g. `2` or `-1`.
     Index(i64),
     /// A slice, e.g. `2:`, `:5`, `1:8:2`, `::-1`.
@@ -35,9 +34,14 @@ impl fmt::Display for ParseError {
 
 impl std::error::Error for ParseError {}
 
-pub fn parse(input: &str) -> Result<Vec<Part>, ParseError> {
+pub fn parse(input: &str) -> Result<Expr, ParseError> {
     let mut p = Parser::new(input);
-    p.parse_expr()
+    let expr = p.parse_expr()?;
+    p.skip_ws();
+    if p.peek().is_some() {
+        return Err(p.err(format!("unexpected character {:?}", p.peek().unwrap() as char)));
+    }
+    Ok(expr)
 }
 
 struct Parser<'a> {
@@ -93,7 +97,7 @@ impl<'a> Parser<'a> {
             }
         }
         if self.pos == digit_start {
-            // No digits; rewind any sign we consumed and report "no int".
+            // No digits; rewind any sign we consumed.
             self.pos = saved;
             return Ok(None);
         }
@@ -108,10 +112,9 @@ impl<'a> Parser<'a> {
             .map_err(|e| ParseError { message: format!("invalid integer '{s}': {e}"), position: start })
     }
 
-    fn parse_part(&mut self) -> Result<Part, ParseError> {
+    fn parse_expr(&mut self) -> Result<Expr, ParseError> {
         self.skip_ws();
-        // Disallow an empty part outright (e.g. ",," or trailing ",").
-        if matches!(self.peek(), None | Some(b',')) {
+        if self.peek().is_none() {
             return Err(self.err("expected index or slice"));
         }
 
@@ -121,7 +124,7 @@ impl<'a> Parser<'a> {
         if self.peek() != Some(b':') {
             // Pure index.
             return match first {
-                Some(n) => Ok(Part::Index(n)),
+                Some(n) => Ok(Expr::Index(n)),
                 None => Err(self.err("expected integer index")),
             };
         }
@@ -138,25 +141,7 @@ impl<'a> Parser<'a> {
             None
         };
 
-        Ok(Part::Slice { start: first, stop, step })
-    }
-
-    fn parse_expr(&mut self) -> Result<Vec<Part>, ParseError> {
-        let mut parts = vec![self.parse_part()?];
-        loop {
-            self.skip_ws();
-            match self.peek() {
-                Some(b',') => {
-                    self.bump();
-                    parts.push(self.parse_part()?);
-                }
-                None => break,
-                Some(c) => {
-                    return Err(self.err(format!("unexpected character {:?}", c as char)));
-                }
-            }
-        }
-        Ok(parts)
+        Ok(Expr::Slice { start: first, stop, step })
     }
 }
 
@@ -164,59 +149,43 @@ impl<'a> Parser<'a> {
 mod tests {
     use super::*;
 
-    fn p(s: &str) -> Vec<Part> {
+    fn p(s: &str) -> Expr {
         parse(s).expect("parse failed")
     }
 
-    fn slice(start: Option<i64>, stop: Option<i64>, step: Option<i64>) -> Part {
-        Part::Slice { start, stop, step }
+    fn slice(start: Option<i64>, stop: Option<i64>, step: Option<i64>) -> Expr {
+        Expr::Slice { start, stop, step }
     }
 
     #[test]
     fn parses_single_index() {
-        assert_eq!(p("0"), vec![Part::Index(0)]);
-        assert_eq!(p("42"), vec![Part::Index(42)]);
-        assert_eq!(p("-3"), vec![Part::Index(-3)]);
-        assert_eq!(p("+7"), vec![Part::Index(7)]);
+        assert_eq!(p("0"), Expr::Index(0));
+        assert_eq!(p("42"), Expr::Index(42));
+        assert_eq!(p("-3"), Expr::Index(-3));
+        assert_eq!(p("+7"), Expr::Index(7));
     }
 
     #[test]
     fn parses_open_slices() {
-        assert_eq!(p(":"), vec![slice(None, None, None)]);
-        assert_eq!(p("2:"), vec![slice(Some(2), None, None)]);
-        assert_eq!(p(":5"), vec![slice(None, Some(5), None)]);
-        assert_eq!(p("1:8"), vec![slice(Some(1), Some(8), None)]);
+        assert_eq!(p(":"), slice(None, None, None));
+        assert_eq!(p("2:"), slice(Some(2), None, None));
+        assert_eq!(p(":5"), slice(None, Some(5), None));
+        assert_eq!(p("1:8"), slice(Some(1), Some(8), None));
     }
 
     #[test]
     fn parses_step_slices() {
-        assert_eq!(p("::"), vec![slice(None, None, None)]);
-        assert_eq!(p("::2"), vec![slice(None, None, Some(2))]);
-        assert_eq!(p("::-1"), vec![slice(None, None, Some(-1))]);
-        assert_eq!(p("1:8:2"), vec![slice(Some(1), Some(8), Some(2))]);
-        assert_eq!(p("-1::-2"), vec![slice(Some(-1), None, Some(-2))]);
-    }
-
-    #[test]
-    fn parses_comma_lists() {
-        assert_eq!(
-            p("0,2,4"),
-            vec![Part::Index(0), Part::Index(2), Part::Index(4)]
-        );
-        assert_eq!(
-            p("0,2:4,-1"),
-            vec![
-                Part::Index(0),
-                slice(Some(2), Some(4), None),
-                Part::Index(-1),
-            ]
-        );
+        assert_eq!(p("::"), slice(None, None, None));
+        assert_eq!(p("::2"), slice(None, None, Some(2)));
+        assert_eq!(p("::-1"), slice(None, None, Some(-1)));
+        assert_eq!(p("1:8:2"), slice(Some(1), Some(8), Some(2)));
+        assert_eq!(p("-1::-2"), slice(Some(-1), None, Some(-2)));
     }
 
     #[test]
     fn ignores_whitespace() {
-        assert_eq!(p(" 1 : 4 : 2 "), vec![slice(Some(1), Some(4), Some(2))]);
-        assert_eq!(p(" 0 , 2 "), vec![Part::Index(0), Part::Index(2)]);
+        assert_eq!(p(" 1 : 4 : 2 "), slice(Some(1), Some(4), Some(2)));
+        assert_eq!(p("  -3  "), Expr::Index(-3));
     }
 
     #[test]
@@ -224,9 +193,9 @@ mod tests {
         assert!(parse("").is_err());
         assert!(parse("abc").is_err());
         assert!(parse("1::2:3").is_err()); // four sections
-        assert!(parse(",").is_err());
-        assert!(parse("1,").is_err());
-        assert!(parse(",1").is_err());
         assert!(parse("1 2").is_err());
+        // Comma-separated indices are NOT valid Python list slicing.
+        assert!(parse("0,1").is_err());
+        assert!(parse("0,2:4").is_err());
     }
 }

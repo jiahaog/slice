@@ -10,13 +10,13 @@ fn main() -> ExitCode {
         [e] => e.clone(),
         _ => {
             eprintln!("usage: slice <expr>");
-            eprintln!("       <expr> is a Python-style slice, e.g. '2:', ':-1', '0,2,4', '::-1'");
+            eprintln!("       <expr> is a Python-style slice, e.g. '2', '2:', ':-1', '::-1', '1:8:2'");
             return ExitCode::from(2);
         }
     };
 
-    let parts = match parser::parse(&expr) {
-        Ok(p) => p,
+    let expr = match parser::parse(&expr) {
+        Ok(e) => e,
         Err(e) => {
             eprintln!("slice: {e}");
             return ExitCode::from(2);
@@ -36,7 +36,7 @@ fn main() -> ExitCode {
             }
         };
         let cols: Vec<&str> = line.split_whitespace().collect();
-        let selected = slicer::apply(&parts, &cols);
+        let selected = slicer::apply(&expr, &cols);
         // join with single space; print empty line if nothing matched
         let mut first = true;
         for s in selected {

@@ -54,10 +54,11 @@ fn reverse_with_step() {
 }
 
 #[test]
-fn comma_separated_picks() {
-    let (stdout, _, code) = run("0,-1", "a b c d\n1 2 3 4\n");
-    assert_eq!(code, 0);
-    assert_eq!(stdout, "a d\n1 4\n");
+fn rejects_comma_lists() {
+    // Comma-separated indices are not valid Python list slicing.
+    let (_, stderr, code) = run("0,-1", "a b c d\n");
+    assert_eq!(code, 2);
+    assert!(stderr.contains("parse error"), "stderr was: {stderr}");
 }
 
 #[test]
