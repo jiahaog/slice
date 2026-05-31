@@ -17,7 +17,13 @@ pub fn apply<'a>(expr: &Expr, cols: &[&'a str]) -> Vec<&'a str> {
 
     match *expr {
         Expr::Index(i) => {
-            let normalized = if i < 0 { i + len } else { i };
+            let normalized = if i >= 0 {
+                i
+            } else if i >= -len {
+                i + len
+            } else {
+                return out;
+            };
             if normalized >= 0 && normalized < len {
                 out.push(cols[normalized as usize]);
             }
@@ -27,12 +33,18 @@ pub fn apply<'a>(expr: &Expr, cols: &[&'a str]) -> Vec<&'a str> {
             if step > 0 {
                 while i < end {
                     out.push(cols[i as usize]);
-                    i += step;
+                    let Some(next) = i.checked_add(step) else {
+                        break;
+                    };
+                    i = next;
                 }
             } else {
                 while i > end {
                     out.push(cols[i as usize]);
-                    i += step;
+                    let Some(next) = i.checked_add(step) else {
+                        break;
+                    };
+                    i = next;
                 }
             }
         }
@@ -57,17 +69,24 @@ fn slice_indices(
         None => 1,
     };
 
-    let (lower, upper) = if step > 0 { (0, length) } else { (-1, length - 1) };
+    let (lower, upper) = if step > 0 {
+        (0, length)
+    } else {
+        (-1, length - 1)
+    };
 
     let clamp = |x: i64| -> i64 {
-        let mut v = if x < 0 { x + length } else { x };
-        if v < lower {
-            v = lower;
+        if x < 0 {
+            if x < lower - length {
+                lower
+            } else {
+                x + length
+            }
+        } else if x > upper {
+            upper
+        } else {
+            x
         }
-        if v > upper {
-            v = upper;
-        }
-        v
     };
 
     let start = match start {
@@ -98,11 +117,63 @@ fn slice_indices(
 mod tests {
     use super::*;
     use crate::parser::parse;
+    use quickcheck::QuickCheck;
+
+    type GeneratedExprParts = (bool, i64, Option<i64>, Option<i64>, Option<i64>);
+
+    fn render_generated_expr((is_index, index, start, stop, step): GeneratedExprParts) -> String {
+        if is_index {
+            return index.to_string();
+        }
+
+        let start = start.map(|n| n.to_string()).unwrap_or_default();
+        let stop = stop.map(|n| n.to_string()).unwrap_or_default();
+        match step {
+            Some(step) => format!("{start}:{stop}:{step}"),
+            None => format!("{start}:{stop}"),
+        }
+    }
 
     fn run<'a>(expr: &str, line: &'a str) -> Vec<&'a str> {
         let e = parse(expr).expect("parse failed");
         let cols: Vec<&str> = line.split_whitespace().collect();
         apply(&e, &cols)
+    }
+
+    fn output_is_subset_of_input(expr: &Expr, cols: &[String]) -> bool {
+        let col_refs: Vec<&str> = cols.iter().map(String::as_str).collect();
+        let selected = apply(expr, &col_refs);
+
+        selected.len() <= col_refs.len() && selected.iter().all(|item| col_refs.contains(item))
+    }
+
+    #[test]
+    fn quickcheck_generated_expressions_parse_and_apply() {
+        fn prop(expr: GeneratedExprParts, cols: Vec<String>) -> bool {
+            let rendered = render_generated_expr(expr);
+            let Ok(parsed) = parse(&rendered) else {
+                return false;
+            };
+            output_is_subset_of_input(&parsed, &cols)
+        }
+
+        QuickCheck::new()
+            .tests(1000)
+            .quickcheck(prop as fn(GeneratedExprParts, Vec<String>) -> bool);
+    }
+
+    #[test]
+    fn quickcheck_arbitrary_expressions_do_not_panic() {
+        fn prop(expr: String, cols: Vec<String>) -> bool {
+            let Ok(parsed) = parse(&expr) else {
+                return true;
+            };
+            output_is_subset_of_input(&parsed, &cols)
+        }
+
+        QuickCheck::new()
+            .tests(1000)
+            .quickcheck(prop as fn(String, Vec<String>) -> bool);
     }
 
     #[test]
@@ -122,6 +193,15 @@ mod tests {
         let empty: Vec<&str> = vec![];
         assert_eq!(run("9", "a b c"), empty);
         assert_eq!(run("-9", "a b c"), empty);
+    }
+
+    #[test]
+    fn extreme_integer_bounds_do_not_overflow() {
+        let empty: Vec<&str> = vec![];
+        assert_eq!(run(&i64::MIN.to_string(), "a b c"), empty);
+        assert_eq!(run(&format!("{}:", i64::MIN), "a b c"), vec!["a", "b", "c"]);
+        assert_eq!(run(&format!("1::{}", i64::MAX), "a b c"), vec!["b"]);
+        assert_eq!(run(&format!("1::{}", i64::MIN), "a b c"), vec!["b"]);
     }
 
     #[test]
