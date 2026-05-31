@@ -10,7 +10,9 @@ fn main() -> ExitCode {
         [e] => e.clone(),
         _ => {
             eprintln!("usage: slice <expr>");
-            eprintln!("       <expr> is a Python-style slice, e.g. '2', '2:', ':-1', '::-1', '1:8:2'");
+            eprintln!(
+                "       <expr> is a Python-style slice, e.g. '2', '2:', ':-1', '::-1', '1:8:2'"
+            );
             return ExitCode::from(2);
         }
     };

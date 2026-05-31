@@ -28,7 +28,11 @@ pub struct ParseError {
 
 impl fmt::Display for ParseError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "parse error at position {}: {}", self.position, self.message)
+        write!(
+            f,
+            "parse error at position {}: {}",
+            self.position, self.message
+        )
     }
 }
 
@@ -39,7 +43,10 @@ pub fn parse(input: &str) -> Result<Expr, ParseError> {
     let expr = p.parse_expr()?;
     p.skip_ws();
     if p.peek().is_some() {
-        return Err(p.err(format!("unexpected character {:?}", p.peek().unwrap() as char)));
+        return Err(p.err(format!(
+            "unexpected character {:?}",
+            p.peek().unwrap() as char
+        )));
     }
     Ok(expr)
 }
@@ -51,7 +58,10 @@ struct Parser<'a> {
 
 impl<'a> Parser<'a> {
     fn new(input: &'a str) -> Self {
-        Self { input: input.as_bytes(), pos: 0 }
+        Self {
+            input: input.as_bytes(),
+            pos: 0,
+        }
     }
 
     fn peek(&self) -> Option<u8> {
@@ -75,7 +85,10 @@ impl<'a> Parser<'a> {
     }
 
     fn err(&self, msg: impl Into<String>) -> ParseError {
-        ParseError { message: msg.into(), position: self.pos }
+        ParseError {
+            message: msg.into(),
+            position: self.pos,
+        }
     }
 
     /// Parse an optional integer (with optional `+` / `-` sign).
@@ -107,9 +120,10 @@ impl<'a> Parser<'a> {
         }
         let s = std::str::from_utf8(&self.input[start..self.pos])
             .map_err(|_| self.err("invalid utf8 in integer"))?;
-        s.parse::<i64>()
-            .map(Some)
-            .map_err(|e| ParseError { message: format!("invalid integer '{s}': {e}"), position: start })
+        s.parse::<i64>().map(Some).map_err(|e| ParseError {
+            message: format!("invalid integer '{s}': {e}"),
+            position: start,
+        })
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
@@ -141,7 +155,11 @@ impl<'a> Parser<'a> {
             None
         };
 
-        Ok(Expr::Slice { start: first, stop, step })
+        Ok(Expr::Slice {
+            start: first,
+            stop,
+            step,
+        })
     }
 }
 
